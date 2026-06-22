@@ -1,0 +1,16 @@
+# ARXOS feature repos  —  name  git-url  [branch]
+# arxupd pulls each and runs its install.sh, so every push reaches users.
+
+# ── native tools ──────────────────────────────────────────────
+arx              https://github.com/thearxos/arx               main
+arxctl           https://github.com/thearxos/arxctl            main
+arxupd           https://github.com/thearxos/arxupd            main
+
+# ── cosmetics (themes, panel, prompt, terminal, wallpapers) ───
+arxos-rice       https://github.com/thearxos/arxos-rice        main
+arxos-vm-resize  https://github.com/thearxos/arxos-vm-resize   main
+
+# ── integrated user tools ────────────────────────────────────
+wallpimp         https://github.com/0xb0rn3/wallpimp           main
+t0rpoiz0n        https://github.com/0xb0rn3/t0rpoiz0n          main
+cpu-governor     https://github.com/0xb0rn3/cpu-governor       main
