@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
+ARXOS_VERSION="0.0.1"   # ARXOS: every tool pinned to 0.0.1
+case "${1:-}" in --version|-V) echo "arxupd ${ARXOS_VERSION} (ARXOS)"; exit 0 ;; esac
 # arxupd - ARXOS self-updater
 # Pulls each ARXOS feature repo (tools + cosmetics) from GitHub and runs its
 # install.sh, so the system receives updates the moment they're pushed.
 # Manifest: /etc/arxos/repos.list   (lines: "name  git-url  [branch]")
 
 set -o pipefail
+: "${TERM:=xterm-256color}"; export TERM   # quiet tput when launched without a terminal (GUI)
 GB=$'\033[1;38;5;220m'; CB=$'\033[1;38;5;45m'; C=$'\033[38;5;45m'
 GR=$'\033[1;32m'; RD=$'\033[1;31m'; DM=$'\033[90m'; BD=$'\033[1m'; RS=$'\033[0m'
 
@@ -17,6 +20,9 @@ trap 'rm -f "$LOG"; [ -t 1 ] && printf "\033[?25h" 2>/dev/null' EXIT INT TERM
 
 _spin(){ # pid label
   local pid="$1" label="$2" i=0
+  # No TTY (GUI / pipe): don't emit spinner frames as lines — just wait quietly;
+  # the per-repo result line prints cleanly afterwards.
+  if [ ! -t 1 ]; then while kill -0 "$pid" 2>/dev/null; do sleep 0.2; done; return; fi
   printf '\033[?25l'
   while kill -0 "$pid" 2>/dev/null; do
     printf "\r  ${C}%s${RS}  ${DM}%s${RS}\033[K" "${SPIN[i++ % ${#SPIN[@]}]}" "$label"; sleep 0.1
