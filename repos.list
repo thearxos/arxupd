@@ -1,10 +1,18 @@
-# ARXOS feature repos  —  name  git-url  [branch]   (pulled by arxupd)
-arx              https://github.com/thearxos/arx               main
-arxctl           https://github.com/thearxos/arxctl            main
-arxupd           https://github.com/thearxos/arxupd            main
-arxos-vm-resize  https://github.com/thearxos/arxos-vm-resize   main
-wallpimp         https://github.com/thearxos/wallpimp          main
-t0rpoiz0n        https://github.com/thearxos/t0rpoiz0n         main
-cpu-governor     https://github.com/thearxos/cpu-governor      main
-droidB           https://github.com/thearxos/droidB            main
-arxguard         https://github.com/thearxos/arxguard          main
+# ARXOS component registry  —  name  git-url  branch  [type]
+#
+# This file is the single source of truth for what ships + updates on ARXOS.
+# `arx update` fetches THIS file from the canonical source first, then clones/pulls
+# every entry and runs its install.sh. So adding a line here pushes that component
+# (a new tool, a kernel, a core update) to every ARXOS install on its next update,
+# and the Control Center / arxos-news detect it automatically.
+#
+# type:  tool (default)  ·  core (arx/arxctl/arxupd)  ·  kernel (linux-arxos)
+arx              https://github.com/thearxos/arx               main  core
+arxctl           https://github.com/thearxos/arxctl            main  core
+arxupd           https://github.com/thearxos/arxupd            main  core
+arxos-vm-resize  https://github.com/thearxos/arxos-vm-resize   main  tool
+wallpimp         https://github.com/thearxos/wallpimp          main  tool
+t0rpoiz0n        https://github.com/thearxos/t0rpoiz0n         main  tool
+cpu-governor     https://github.com/thearxos/cpu-governor      main  tool
+droidB           https://github.com/thearxos/droidB            main  tool
+arxguard         https://github.com/thearxos/arxguard          main  tool
