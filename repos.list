@@ -12,7 +12,7 @@ arxctl           https://github.com/thearxos/arxctl            main  core
 arxupd           https://github.com/thearxos/arxupd            main  core
 arxos-vm-resize  https://github.com/thearxos/arxos-vm-resize   main  tool
 wallpimp         https://github.com/thearxos/wallpimp          main  tool
-t0rpoiz0n        https://github.com/thearxos/t0rpoiz0n         main  tool
+anonkit        https://github.com/thearxos/anonkit         main  tool
 cpu-governor     https://github.com/thearxos/cpu-governor      main  tool
 droidB           https://github.com/thearxos/droidB            main  tool
 arxguard         https://github.com/thearxos/arxguard          main  tool
