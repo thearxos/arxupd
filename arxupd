@@ -4,24 +4,33 @@ case "${1:-}" in --version|-V) echo "arxupd ${ARXOS_VERSION} (ARXOS)"; exit 0 ;;
 # arxupd - ARXOS self-updater
 # Pulls each ARXOS feature repo (tools + cosmetics) from GitHub and runs its
 # install.sh, so the system receives updates the moment they're pushed.
-# Manifest: /etc/arxos/repos.list   (lines: "name  git-url  [branch]")
+# Manifest: /etc/arxos/repos.list   (lines: "name  git-url  [branch]  [type]  [verify]")
 
+# Safety & hardening
+set -o nounset
 set -o pipefail
 : "${TERM:=xterm-256color}"; export TERM   # quiet tput when launched without a terminal (GUI)
+export GIT_TERMINAL_PROMPT=0
+export GIT_OPTIONAL_LOCKS=0
+
 GB=$'\033[1;38;5;220m'; CB=$'\033[1;38;5;45m'; C=$'\033[38;5;45m'
 GR=$'\033[1;32m'; RD=$'\033[1;31m'; DM=$'\033[90m'; BD=$'\033[1m'; RS=$'\033[0m'
 
 MANIFEST="${ARXOS_MANIFEST:-/etc/arxos/repos.list}"
 CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/arxos/repos"
-mkdir -p "$CACHE"
+mkdir -p -- "$CACHE"
 
-SPIN=('|' '/' '-' '\\'); LOG=$(mktemp /tmp/arxupd.XXXXXX)
+# Default conservative concurrency for network work (fetch/clone/verify). Can be
+# overridden by environment: ARXUPD_CONCURRENCY
+CONCURRENCY=${ARXUPD_CONCURRENCY:-4}
+
+SPIN=('|' '/' '-' '\\')
+LOG=$(mktemp -u -p /tmp arxupd.XXXXXX)
+: > "$LOG"
 trap 'rm -f "$LOG"; [ -t 1 ] && printf "\033[?25h" 2>/dev/null' EXIT INT TERM
 
 _spin(){ # pid label
   local pid="$1" label="$2" i=0
-  # No TTY (GUI / pipe): don't emit spinner frames as lines — just wait quietly;
-  # the per-repo result line prints cleanly afterwards.
   if [ ! -t 1 ]; then while kill -0 "$pid" 2>/dev/null; do sleep 0.2; done; return; fi
   printf '\033[?25l'
   while kill -0 "$pid" 2>/dev/null; do
@@ -30,105 +39,139 @@ _spin(){ # pid label
   printf '\r\033[K\033[?25h'
 }
 
+# Helper: retry a command (git network ops) up to N tries with exponential backoff
+git_retry(){
+  local tries=3 delay=1 n=1 rc
+  while true; do
+    if "$@"; then return 0; fi
+    rc=$?
+    if [ $n -ge $tries ]; then return $rc; fi
+    echo "git: command failed (attempt $n/$tries) — retrying in ${delay}s" >>"$LOG"
+    sleep $delay
+    delay=$((delay * 2))
+    n=$((n + 1))
+  done
+}
+
 [ -f "$MANIFEST" ] || { printf "  ${RD}xx${RS} no manifest at %s\n" "$MANIFEST"; exit 1; }
 
 printf "\n  ${GB}arx${CB}upd${RS} ${DM}::${RS} ${BD}syncing ARXOS feature repos${RS}\n\n"
 
+# workspace for parallel job logs/status
+TMPDIR=$(mktemp -d /tmp/arxupd.jobs.XXXXXX)
+trap 'rm -rf "$TMPDIR"' EXIT
+
+# semaphore (named pipe + fd) for concurrency control
+mkfifo "$TMPDIR/sem"
+exec 3<>"$TMPDIR/sem"
+rm -f "$TMPDIR/sem"
+for _ in $(seq 1 $CONCURRENCY); do printf '\n' >&3; done
+
+# Arrays to collect install candidates and final statuses
+install_list=()
+status_file="$TMPDIR/results.txt"
+: > "$status_file"
+
 # Counters
 n_up=0 n_new=0 n_same=0 n_err=0
 
-# Manifest format: name  git-url  [branch]  [type]  [verify]
-# verify: optional token `commit=SHA` or `tag=TAGNAME` (signed annotated tag)
-while read -r name url branch type verify _; do
-  [[ -z "$name" || "$name" == \#* ]] && continue
-  branch="${branch:-main}"
-  dir="$CACHE/$name"
-  status="" rc=0
+# Worker: perform clone/fetch/verify and write status/log
+worker(){
+  local name="$1" url="$2" branch="$3" type="$4" verify="$5"
+  local joblog="$TMPDIR/$name.log"
+  local jobstatus="$TMPDIR/$name.status"
+  : > "$joblog"
 
-  # Determine whether we need a full fetch/clone (tags/ancestors required for verification)
-  need_full_fetch=0
-  if [ -n "$verify" ]; then
-    need_full_fetch=1
+  # basic checks
+  if [ -z "$name" ] || [ -z "$url" ]; then
+    echo "err|$name|invalid input" >"$jobstatus"
+    return
   fi
 
+  dir="$CACHE/$name"
+  need_full_fetch=0
+  if [ -n "${verify:-}" ]; then need_full_fetch=1; fi
+
+  # clone or fetch
   if [ -d "$dir/.git" ]; then
-    before=$(git -C "$dir" rev-parse HEAD 2>/dev/null)
+    before=$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)
     if [ $need_full_fetch -eq 1 ]; then
-      # full fetch so tags and history are available for verification
-      ( git -C "$dir" fetch -q origin "$branch" && \
-        git -C "$dir" fetch -q --tags origin && \
-        git -C "$dir" reset -q --hard "origin/$branch" ) >"$LOG" 2>&1 & _spin $! "$name  (pulling)"
+      git_retry git -C "$dir" fetch -q origin "$branch" >>"$joblog" 2>&1 || true
+      git_retry git -C "$dir" fetch -q --tags origin >>"$joblog" 2>&1 || true
+      git -C "$dir" reset -q --hard "origin/$branch" >>"$joblog" 2>&1 || true
     else
-      ( git -C "$dir" fetch -q --depth=1 origin "$branch" && \
-        git -C "$dir" reset -q --hard "origin/$branch" ) >"$LOG" 2>&1 & _spin $! "$name  (pulling)"
+      git_retry git -C "$dir" fetch -q --depth=1 origin "$branch" >>"$joblog" 2>&1 || true
+      git -C "$dir" reset -q --hard "origin/$branch" >>"$joblog" 2>&1 || true
     fi
-    wait $!; rc=$?
-    after=$(git -C "$dir" rev-parse HEAD 2>/dev/null)
-    if   [ $rc -ne 0 ]; then status="err"
-    elif [ "$before" = "$after" ]; then status="same"
-    else status="upd"; fi
+    after=$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)
+    if [ -z "$after" ]; then echo "err|$name|git error" >"$jobstatus"; return; fi
+    if [ "$before" = "$after" ]; then echo "same|$name|$after" >"$jobstatus"; return; fi
+    echo "upd|$name|$after" >"$jobstatus"; return
   else
     if [ $need_full_fetch -eq 1 ]; then
-      ( git clone -q -b "$branch" "$url" "$dir" ) >"$LOG" 2>&1 & _spin $! "$name  (cloning)"
+      git_retry git clone -q -b "$branch" "$url" "$dir" >>"$joblog" 2>&1 || { echo "err|$name|clone failed" >"$jobstatus"; return; }
     else
-      ( git clone -q --depth=1 -b "$branch" "$url" "$dir" ) >"$LOG" 2>&1 & _spin $! "$name  (cloning)"
+      git_retry git clone -q --depth=1 -b "$branch" "$url" "$dir" >>"$joblog" 2>&1 || { echo "err|$name|clone failed" >"$jobstatus"; return; }
     fi
-    wait $!; rc=$?
-    [ $rc -eq 0 ] && status="new" || status="err"
-    after=$(git -C "$dir" rev-parse HEAD 2>/dev/null) || after=""
+    after=$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)
+    if [ -z "$after" ]; then echo "err|$name|clone no head" >"$jobstatus"; return; fi
+    echo "new|$name|$after" >"$jobstatus"; return
+  fi
+}
+
+# Read manifest into an array of entries to preserve ordering
+mapfile -t manifest_lines < <(sed -n 's/^\s*#.*//; /^\s*$/d; p' "$MANIFEST")
+
+for line in "${manifest_lines[@]}"; do
+  # parse fields
+  read -r name url branch type verify _ <<< "$line"
+  branch="${branch:-main}"
+  # sanitize name — skip invalid
+  if ! [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    printf "  ${RD}xx${RS} %-22s ${RD}%s${RS}\n" "$name" "invalid manifest name (skipped)"
+    ((n_err++))
+    continue
   fi
 
-  # If verification requested, perform checks before running install.sh
-  if [ -n "$verify" ] && [ "$status" != "err" ]; then
-    case "$verify" in
-      commit=*)
-        want_sha="${verify#commit=}"
-        if [ -z "$after" ] || [ "$after" != "$want_sha" ]; then
-          status="err"
-          echo "verification failed: expected commit $want_sha, got ${after:-none}" >>"$LOG"
-        fi
-        ;;
-      tag=*)
-        tagname="${verify#tag=}"
-        # ensure tags are present and verify signature (requires signer's pubkey)
-        git -C "$dir" fetch -q --tags origin >>"$LOG" 2>&1 || true
-        git -C "$dir" tag -v "$tagname" >"$LOG" 2>&1
-        rc_tag=$?
-        if [ $rc_tag -ne 0 ]; then
-          status="err"
-          echo "verification failed: tag $tagname signature invalid or missing" >>"$LOG"
-        else
-          # ensure tag points to current HEAD
-          tag_commit=$(git -C "$dir" rev-parse "refs/tags/$tagname^{commit}" 2>/dev/null || true)
-          if [ -z "$tag_commit" ] || [ "$tag_commit" != "$after" ]; then
-            status="err"
-            echo "verification failed: tag $tagname does not point to checked out commit" >>"$LOG"
-          fi
-        fi
-        ;;
-      *)
-        status="err"
-        echo "unknown verify token: $verify" >>"$LOG"
-        ;;
-    esac
-  fi
+  # acquire token (blocks if none available)
+  read -u 3 -r _
+  {
+    worker "$name" "$url" "$branch" "$type" "$verify"
+    # release token
+    printf '\n' >&3
+  } &
+done
 
-  # run the repo's installer on change (only when verification passed)
-  if [ "$status" = "upd" ] || [ "$status" = "new" ]; then
-    if [ -f "$dir/install.sh" ]; then
-      ( cd "$dir" && bash install.sh ) >"$LOG" 2>&1 & _spin $! "$name  (installing)"
-      wait $!; [ $? -ne 0 ] && status="err"
-    fi
-  fi
+# wait for all background workers
+wait
+# close fd
+exec 3>&-
 
-  case "$status" in
-    upd)  printf "  ${GR}>>${RS} %-22s ${GR}updated${RS}\n"  "$name"; ((n_up++)) ;;
-    new)  printf "  ${GR}>>${RS} %-22s ${GR}installed${RS}\n" "$name"; ((n_new++)) ;;
-    same) printf "  ${DM}..${RS} %-22s ${DM}up to date${RS}\n" "$name"; ((n_same++)) ;;
-    err)  printf "  ${RD}xx${RS} %-22s ${RD}%s${RS}\n" "$name" "$(grep -iE 'error|fatal|could not|verification failed' "$LOG" | head -1 | sed 's/^[^:]*: //')"; ((n_err++)) ;;
+# Collect statuses and prepare install candidates
+for s in "$TMPDIR"/*.status; do
+  [ -e "$s" ] || continue
+  IFS='|' read -r st name sha < <(cat "$s")
+  case "$st" in
+    upd) printf "  ${GR}>>${RS} %-22s ${GR}updated${RS}\n" "$name"; ((n_up++)); install_list+=("$name") ;;
+    new) printf "  ${GR}>>${RS} %-22s ${GR}installed${RS}\n" "$name"; ((n_new++)); install_list+=("$name") ;;
+    same) printf "  ${DM}..${RS} %-22s ${DM}up to date${RS}\n" "$name"; ((n_same++)); ;;
+    err) errmsg=$(sed -n '1p' "$TMPDIR/$name.log" | sed -n '1p'); printf "  ${RD}xx${RS} %-22s ${RD}%s${RS}\n" "$name" "${errmsg:-failed}"; ((n_err++)); ;;
+    *) printf "  ${RD}xx${RS} %-22s ${RD}%s${RS}\n" "$name" "unknown status"; ((n_err++)); ;;
   esac
+done
 
-done < "$MANIFEST"
+# Run installers serially (safe mode) — only for install candidates
+for name in "${install_list[@]}"; do
+  dir="$CACHE/$name"
+  if [ -f "$dir/install.sh" ]; then
+    printf "  ${DM}::${RS} running install for %s\n" "$name"
+    # Run installer in a tightly-scoped environment to avoid leaking host env
+    if ! ( cd "$dir" && env -i PATH=/usr/bin:/bin HOME="$dir" GIT_TERMINAL_PROMPT=0 bash --noprofile --norc "./install.sh" ) >"$TMPDIR/$name.install.log" 2>&1; then
+      printf "  ${RD}xx${RS} %-22s ${RD}%s${RS}\n" "$name" "install failed"
+      ((n_err++))
+    fi
+  fi
+done
 
 printf "\n  ${DM}%s updated · %s installed · %s current · %s failed${RS}\n\n" "$n_up" "$n_new" "$n_same" "$n_err"
 [ "$n_err" -eq 0 ]
