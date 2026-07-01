@@ -57,10 +57,10 @@ while read -r name url branch type verify _; do
       # full fetch so tags and history are available for verification
       ( git -C "$dir" fetch -q origin "$branch" && \
         git -C "$dir" fetch -q --tags origin && \
-        git -C "$dir" reset -q --hard "origin/$branch" ) >"$LOG" 2>&1 & _spin $! "$name  (pulling)"
+        git -C "$dir" reset -q --hard "origin/$branch" ) >"$LOG" 2>&1 < /dev/null & _spin $! "$name  (pulling)"
     else
       ( git -C "$dir" fetch -q --depth=1 origin "$branch" && \
-        git -C "$dir" reset -q --hard "origin/$branch" ) >"$LOG" 2>&1 & _spin $! "$name  (pulling)"
+        git -C "$dir" reset -q --hard "origin/$branch" ) >"$LOG" 2>&1 < /dev/null & _spin $! "$name  (pulling)"
     fi
     wait $!; rc=$?
     after=$(git -C "$dir" rev-parse HEAD 2>/dev/null)
@@ -69,9 +69,9 @@ while read -r name url branch type verify _; do
     else status="upd"; fi
   else
     if [ $need_full_fetch -eq 1 ]; then
-      ( git clone -q -b "$branch" "$url" "$dir" ) >"$LOG" 2>&1 & _spin $! "$name  (cloning)"
+      ( git clone -q -b "$branch" "$url" "$dir" ) >"$LOG" 2>&1 < /dev/null & _spin $! "$name  (cloning)"
     else
-      ( git clone -q --depth=1 -b "$branch" "$url" "$dir" ) >"$LOG" 2>&1 & _spin $! "$name  (cloning)"
+      ( git clone -q --depth=1 -b "$branch" "$url" "$dir" ) >"$LOG" 2>&1 < /dev/null & _spin $! "$name  (cloning)"
     fi
     wait $!; rc=$?
     [ $rc -eq 0 ] && status="new" || status="err"
@@ -116,7 +116,7 @@ while read -r name url branch type verify _; do
   # run the repo's installer on change (only when verification passed)
   if [ "$status" = "upd" ] || [ "$status" = "new" ]; then
     if [ -f "$dir/install.sh" ]; then
-      ( cd "$dir" && bash install.sh ) >"$LOG" 2>&1 & _spin $! "$name  (installing)"
+      ( cd "$dir" && bash install.sh ) >"$LOG" 2>&1 < /dev/null & _spin $! "$name  (installing)"
       wait $!; [ $? -ne 0 ] && status="err"
     fi
   fi
