@@ -38,10 +38,12 @@ printf "\n  ${GB}arx${CB}upd${RS} ${DM}::${RS} ${BD}syncing ARXOS feature repos$
 n_up=0 n_new=0 n_same=0 n_err=0
 
 # Manifest format: name  git-url  [branch]  [type]  [verify]
-# verify: optional token `commit=SHA` or `tag=TAGNAME` (signed annotated tag)
+# verify: optional token - commit=SHA | tag=TAGNAME (GPG-signed annotated tag) | signed (GPG-signed HEAD)
 while read -r name url branch type verify _; do
   [[ -z "$name" || "$name" == \#* ]] && continue
   branch="${branch:-main}"
+  # supply chain: only pull over HTTPS (blocks http/ssh/file manifest tampering)
+  case "$url" in https://*) : ;; *) echo "  refused: non-HTTPS url for $name" >&2; continue ;; esac
   dir="$CACHE/$name"
   status="" rc=0
 
@@ -104,6 +106,12 @@ while read -r name url branch type verify _; do
             status="err"
             echo "verification failed: tag $tagname does not point to checked out commit" >>"$LOG"
           fi
+        fi
+        ;;
+      signed|sig)
+        if ! git -C "$dir" verify-commit HEAD >"$LOG" 2>&1; then
+          status="err"
+          echo "verification failed: HEAD commit is not signed by a trusted key" >>"$LOG"
         fi
         ;;
       *)
