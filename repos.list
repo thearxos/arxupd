@@ -7,13 +7,13 @@
 # and the Control Center / arxos-news detect it automatically.
 #
 # type:  tool (default)  ·  core (arx/arxctl/arxupd)  ·  kernel (linux-arxos)
-arx              https://github.com/thearxos/arx               main  core
-arxctl           https://github.com/thearxos/arxctl            main  core
-arxupd           https://github.com/thearxos/arxupd            main  core
-arxos-vm-resize  https://github.com/thearxos/arxos-vm-resize   main  tool
-wallpimp         https://github.com/thearxos/wallpimp          main  tool
-anonkit        https://github.com/thearxos/anonkit         main  tool
-cpu-governor     https://github.com/thearxos/cpu-governor      main  tool
-droidB           https://github.com/thearxos/droidB            main  tool
-arxguard         https://github.com/thearxos/arxguard          main  tool
-arxos-greeter  https://github.com/thearxos/arxos-greeter  main
+arx https://github.com/thearxos/arx-dist main core
+arxctl https://github.com/thearxos/arxctl-dist main core
+arxupd https://github.com/thearxos/arxupd-dist main core
+arxos-vm-resize https://github.com/thearxos/arxos-vm-resize-dist main tool
+wallpimp https://github.com/thearxos/wallpimp-dist main tool
+anonkit https://github.com/thearxos/anonkit-dist main tool
+cpu-governor https://github.com/thearxos/cpu-governor-dist main tool
+droidB https://github.com/thearxos/droidB-dist main tool
+arxguard https://github.com/thearxos/arxguard-dist main tool
+arxos-greeter https://github.com/thearxos/arxos-greeter-dist main
