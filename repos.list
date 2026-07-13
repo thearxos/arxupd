@@ -18,3 +18,4 @@ droidB https://github.com/thearxos/droidB-dist main tool
 arxguard https://github.com/thearxos/arxguard-dist main tool
 arxos-greeter https://github.com/thearxos/arxos-greeter-dist main
 arxos-browser https://github.com/thearxos/arxos-browser-dist main core
+linux-arxos https://github.com/thearxos/linux-arxos-dist main kernel
